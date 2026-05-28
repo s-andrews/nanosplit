@@ -5,6 +5,7 @@ import json
 import os
 import random
 import string
+import zipfile
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -187,6 +188,23 @@ def unique_filename(filename: str, used: set) -> str:
         i += 1
     used.add(candidate)
     return candidate
+
+
+def split_download_paths(job_dir: Path, cfg: Dict) -> List[Path]:
+    split_files = cfg.get("split_files")
+    if split_files:
+        paths = [job_dir / name for name in split_files]
+    else:
+        paths = sorted(job_dir.glob("subset_*.fastq"))
+
+    seen = set()
+    result = []
+    for path in paths:
+        if not path.exists() or path.name in seen:
+            continue
+        seen.add(path.name)
+        result.append(path)
+    return result
 
 
 def update_status(job_dir: Path, step: str, status: str):
@@ -474,24 +492,16 @@ def job_downloads(job_id):
 
     files = []
     cfg = load_job(job_dir)
-    split_files = cfg.get("split_files")
-    filtered_path = filtered_fastq_path(job_dir, cfg)
-    paths = [filtered_path] if filtered_path.exists() else []
-    if split_files:
-        paths.extend(job_dir / name for name in split_files)
-    else:
-        paths.extend(sorted(job_dir.glob("subset_*.fastq")))
-
-    seen = set()
-    for path in paths:
-        if not path.exists() or path.name in seen:
-            continue
-        seen.add(path.name)
+    for path in split_download_paths(job_dir, cfg):
         files.append({
             "name": path.name,
             "url": url_for("download_file", job_id=job_id, filename=path.name),
         })
-    return jsonify({"ready": True, "files": files})
+    return jsonify({
+        "ready": True,
+        "files": files,
+        "zip_url": url_for("download_split_zip", job_id=job_id) if files else None,
+    })
 
 
 @app.route("/api/job/<job_id>/submit_step5", methods=["POST"])
@@ -512,6 +522,31 @@ def download_file(job_id, filename):
     if not p.exists():
         return "Not found", 404
     return send_file(p, as_attachment=True)
+
+
+@app.route("/job/<job_id>/download/split_sequences.zip")
+def download_split_zip(job_id):
+    job_dir = DATA_DIR / job_id
+    if not job_dir.exists():
+        return "Job not found", 404
+
+    cfg = load_job(job_dir)
+    paths = split_download_paths(job_dir, cfg)
+    if not paths:
+        return "No split FASTQ files are available", 404
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in paths:
+            zf.write(path, arcname=path.name)
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{get_output_base(cfg)}_split_sequences.zip",
+    )
 
 
 if __name__ == "__main__":

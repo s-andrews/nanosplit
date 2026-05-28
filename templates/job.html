@@ -381,9 +381,18 @@ async function loadDownloads(){
     return;
   }
 
-  el.innerHTML = data.files.map(file => `
-    <a class="btn btn-outline-primary me-2 mb-2 sequence-text" href="${file.url}">${file.name}</a>
-  `).join('');
+  el.innerHTML = `
+    <div class="mb-3">
+      <a class="btn btn-primary" href="${data.zip_url}">Download all split sequences (.zip)</a>
+    </div>
+    <ul class="list-group">
+      ${data.files.map(file => `
+        <li class="list-group-item">
+          <a class="sequence-text" href="${file.url}">${file.name}</a>
+        </li>
+      `).join('')}
+    </ul>
+  `;
 }
 
 async function init() {
