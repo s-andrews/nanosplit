@@ -12,6 +12,10 @@
       position: relative;
       width: 100%;
     }
+
+    .sequence-text {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
   </style>
 </head>
 <body>
@@ -58,6 +62,7 @@ const JOB_ID = "{{ job.job_id }}";
 let lenChart, bcChart, finalChart;
 let step4Data = null;
 let pollTimer = null;
+const SEQUENCE_FONT = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
 
 const STEP_LOADERS = {
   lengths: loadLengths,
@@ -104,6 +109,16 @@ function histogram(values, bin=100) {
   return {labels: bins.map((_,i)=>`${i*bin}`), counts: bins};
 }
 
+function sequenceAxisWidth(labels) {
+  const longest = labels.reduce((max, label) => Math.max(max, String(label).length), 0);
+  return Math.min(520, Math.max(180, longest * 8 + 28));
+}
+
+function setChartRows(chartId, rowCount) {
+  const wrap = document.getElementById(chartId).parentElement;
+  wrap.style.height = `${Math.min(1400, Math.max(360, rowCount * 28 + 80))}px`;
+}
+
 async function loadLengths() {
   const data = await (await fetch(`/api/job/${JOB_ID}/lengths`)).json();
   if (!data.ready) return;
@@ -131,16 +146,29 @@ function renderStep4(){
   const minCount = +document.getElementById('minCount').value;
   const maxBars = +document.getElementById('maxBars').value;
   const items = step4Data.barcodes.filter(x=>x.count>=minCount).slice(0,maxBars);
+  const labels = items.map(x=>x.barcode);
+  setChartRows('bcChart', items.length);
   if (bcChart) bcChart.destroy();
   bcChart = new Chart(document.getElementById('bcChart'), {
     type:'bar',
-    data:{labels:items.map(x=>x.barcode), datasets:[
+    data:{labels, datasets:[
       {label:'Forward %', data:items.map(x=>100*x.forward/step4Data.total), backgroundColor:'rgba(54,162,235,0.7)'},
       {label:'Reverse %', data:items.map(x=>100*x.reverse/step4Data.total), backgroundColor:'rgba(255,99,132,0.7)'}
-    ]}, options:{maintainAspectRatio:false, scales:{x:{stacked:true}, y:{stacked:true}}}
+    ]}, options:{
+      indexAxis:'y',
+      maintainAspectRatio:false,
+      scales:{
+        x:{stacked:true},
+        y:{
+          stacked:true,
+          afterFit(scale) { scale.width = sequenceAxisWidth(labels); },
+          ticks:{autoSkip:false, font:{family:SEQUENCE_FONT}}
+        }
+      }
+    }
   });
   const div = document.getElementById('step4boxes');
-  div.innerHTML = items.map(x=>`<label class='me-2'><input type='checkbox' value='${x.barcode}' checked> ${x.barcode}</label>`).join('');
+  div.innerHTML = items.map(x=>`<label class='me-2 sequence-text'><input type='checkbox' value='${x.barcode}' checked> ${x.barcode}</label>`).join('');
 }
 
 async function submitStep4() {
@@ -152,9 +180,24 @@ async function submitStep4() {
 async function loadStep5() {
   const data = await (await fetch(`/api/job/${JOB_ID}/final_quant`)).json();
   if (!data.ready) return;
+  const labels = data.rows.map(x=>x.key);
+  setChartRows('finalChart', data.rows.length);
   if (finalChart) finalChart.destroy();
-  finalChart = new Chart(document.getElementById('finalChart'), {type:'bar', data:{labels:data.rows.map(x=>x.key), datasets:[{label:'%', data:data.rows.map(x=>x.pct)}]}, options:{maintainAspectRatio:false}});
-  document.getElementById('step5boxes').innerHTML = data.rows.map(x=>`<label class='me-2'><input type='checkbox' value='${x.key}' checked> ${x.key}</label>`).join('');
+  finalChart = new Chart(document.getElementById('finalChart'), {
+    type:'bar',
+    data:{labels, datasets:[{label:'%', data:data.rows.map(x=>x.pct)}]},
+    options:{
+      indexAxis:'y',
+      maintainAspectRatio:false,
+      scales:{
+        y:{
+          afterFit(scale) { scale.width = sequenceAxisWidth(labels); },
+          ticks:{autoSkip:false, font:{family:SEQUENCE_FONT}}
+        }
+      }
+    }
+  });
+  document.getElementById('step5boxes').innerHTML = data.rows.map(x=>`<label class='me-2 sequence-text'><input type='checkbox' value='${x.key}' checked> ${x.key}</label>`).join('');
 }
 
 async function submitStep5(){
