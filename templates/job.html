@@ -74,14 +74,18 @@
 
   <div class="card p-3 mb-3">
     <h4>Step 5: Final barcode/pair quantitation</h4>
-    <div class="selection-controls mb-2">
+    <div class="chart-wrap"><canvas id="finalChart"></canvas></div>
+    <div class="selection-controls mt-2">
       <div class="form-field">
         <label class="form-label mb-1">Min count</label>
         <input id="finalMinCount" type="number" class="form-control" value="1">
       </div>
+      <div class="form-field">
+        <label class="form-label mb-1">Max bars</label>
+        <input id="finalMaxBars" type="number" class="form-control" value="30">
+      </div>
       <button class="btn btn-primary" onclick="renderStep5()">Apply filter</button>
     </div>
-    <div class="chart-wrap"><canvas id="finalChart"></canvas></div>
     <div class="d-flex flex-wrap gap-3 align-items-center mt-2">
       <button class="btn btn-success" onclick="submitStep5()">Split reads using selected final keys</button>
       <span id="step5SelectedCount" class="selected-count">0 selected</span>
@@ -280,7 +284,8 @@ async function loadStep5() {
 function renderStep5() {
   if (!finalData || !finalData.rows) return;
   const minCount = +document.getElementById('finalMinCount').value;
-  const items = finalData.rows;
+  const maxBars = +document.getElementById('finalMaxBars').value;
+  const items = finalData.rows.slice(0,maxBars);
   const labels = items.map(x=>x.key);
   selectedStep5 = new Set(items.filter(x=>x.count>=minCount).map(x=>x.key));
   updateSelectedCount('step5SelectedCount', selectedStep5.size);
