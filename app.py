@@ -62,6 +62,70 @@ def load_job(job_dir: Path) -> Dict:
     return json.loads(p.read_text())
 
 
+def output_base_name(filename: str) -> str:
+    path = Path(filename or "input.fastq")
+    name = path.name
+    for suffix in (".gz", ".fastq", ".fq"):
+        if name.lower().endswith(suffix):
+            name = name[:-len(suffix)]
+    return safe_filename_part(name) or "input"
+
+
+def safe_filename_part(value: str) -> str:
+    cleaned = []
+    for ch in value.strip():
+        if ch.isalnum() or ch in ("-", "_", "."):
+            cleaned.append(ch)
+        elif ch.isspace():
+            cleaned.append("_")
+    return "".join(cleaned).strip("._") or "unnamed"
+
+
+def get_output_base(cfg: Dict) -> str:
+    return cfg.get("output_base") or output_base_name(cfg.get("fastq_name", "input.fastq"))
+
+
+def filtered_fastq_path(job_dir: Path, cfg: Dict) -> Path:
+    filename = cfg.get("filtered_name") or f"{get_output_base(cfg)}_filtered.fastq"
+    path = job_dir / filename
+    legacy_path = job_dir / "filtered.fastq"
+    if path.exists() or not legacy_path.exists():
+        return path
+    return legacy_path
+
+
+def barcode_label_map(cfg: Dict) -> Dict[str, str]:
+    labels = {}
+    for row in cfg.get("named_barcodes", []):
+        if len(row) < 2:
+            continue
+        name, barcode = row[0], row[1]
+        if not name or not barcode:
+            continue
+        label = f"{safe_filename_part(name)}_{safe_filename_part(barcode)}"
+        labels[barcode] = label
+        labels[rc(barcode)] = label
+        labels[min(barcode, rc(barcode))] = label
+    return labels
+
+
+def output_label_for_key(key: str, cfg: Dict) -> str:
+    labels = barcode_label_map(cfg)
+    parts = key.split("|")
+    return "__".join(labels.get(part, safe_filename_part(part)) for part in parts)
+
+
+def unique_filename(filename: str, used: set) -> str:
+    path = Path(filename)
+    candidate = filename
+    i = 2
+    while candidate in used:
+        candidate = f"{path.stem}_{i}{path.suffix}"
+        i += 1
+    used.add(candidate)
+    return candidate
+
+
 def update_status(job_dir: Path, step: str, status: str):
     st = {}
     sp = job_dir / "status.json"
@@ -86,7 +150,9 @@ def filter_and_barcodes(job_dir_s: str, min_len: int, max_len: int):
     update_status(job_dir, "filter_barcodes", "running")
     cfg = load_job(job_dir)
     in_path = job_dir / cfg["fastq_name"]
-    out_path = job_dir / "filtered.fastq"
+    cfg["filtered_name"] = f"{get_output_base(cfg)}_filtered.fastq"
+    save_job(job_dir, cfg)
+    out_path = filtered_fastq_path(job_dir, cfg)
     bc_len = int(cfg["barcode_length"])
     c = Counter()
     total = 0
@@ -140,7 +206,7 @@ def quantitate_final(job_dir_s: str, selected: List[str]):
     cfg = load_job(job_dir)
     dual = cfg["barcode_mode"] == "both"
     counts = Counter()
-    path = job_dir / "filtered.fastq"
+    path = filtered_fastq_path(job_dir, cfg)
     for _, s, _, _ in iter_fastq(path):
         left = None
         right = None
@@ -168,14 +234,20 @@ def split_fastq(job_dir_s: str, selected_keys: List[str]):
     cfg = load_job(job_dir)
     dual = cfg["barcode_mode"] == "both"
     chosen = set(selected_keys)
+    output_base = get_output_base(cfg)
     outs = {}
+    split_files = []
+    used_filenames = set()
     for k in chosen:
-        safe = k.replace("|", "__")
-        outs[k] = open(job_dir / f"subset_{safe}.fastq", "wt")
-    unmatched = open(job_dir / "subset_unmatched.fastq", "wt")
+        filename = unique_filename(f"{output_base}_{output_label_for_key(k, cfg)}.fastq", used_filenames)
+        split_files.append(filename)
+        outs[k] = open(job_dir / filename, "wt")
+    unmatched_name = unique_filename(f"{output_base}_unmatched.fastq", used_filenames)
+    split_files.append(unmatched_name)
+    unmatched = open(job_dir / unmatched_name, "wt")
 
     selected_barcodes = cfg.get("selected_step4", [])
-    for h, s, p, q in iter_fastq(job_dir / "filtered.fastq"):
+    for h, s, p, q in iter_fastq(filtered_fastq_path(job_dir, cfg)):
         left = None
         right = None
         for b in selected_barcodes:
@@ -193,6 +265,8 @@ def split_fastq(job_dir_s: str, selected_keys: List[str]):
     for o in outs.values():
         o.close()
     unmatched.close()
+    cfg["split_files"] = sorted(split_files)
+    save_job(job_dir, cfg)
     update_status(job_dir, "split", "done")
 
 
@@ -229,6 +303,7 @@ def create_job():
     cfg = {
         "job_id": job_id,
         "fastq_name": saved_name,
+        "output_base": output_base_name(saved_name),
         "barcode_length": barcode_len,
         "barcode_mode": barcode_mode,
         "named_barcodes": parsed_named,
@@ -305,6 +380,34 @@ def final_quant(job_id):
     if not p.exists():
         return jsonify({"ready": False})
     return jsonify({"ready": True, **json.loads(p.read_text())})
+
+
+@app.route("/api/job/<job_id>/downloads")
+def job_downloads(job_id):
+    job_dir = DATA_DIR / job_id
+    if not job_dir.exists():
+        return jsonify({"ready": False}), 404
+
+    files = []
+    cfg = load_job(job_dir)
+    split_files = cfg.get("split_files")
+    filtered_path = filtered_fastq_path(job_dir, cfg)
+    paths = [filtered_path] if filtered_path.exists() else []
+    if split_files:
+        paths.extend(job_dir / name for name in split_files)
+    else:
+        paths.extend(sorted(job_dir.glob("subset_*.fastq")))
+
+    seen = set()
+    for path in paths:
+        if not path.exists() or path.name in seen:
+            continue
+        seen.add(path.name)
+        files.append({
+            "name": path.name,
+            "url": url_for("download_file", job_id=job_id, filename=path.name),
+        })
+    return jsonify({"ready": True, "files": files})
 
 
 @app.route("/api/job/<job_id>/submit_step5", methods=["POST"])

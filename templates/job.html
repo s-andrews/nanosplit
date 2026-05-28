@@ -208,9 +208,15 @@ async function submitStep5(){
 
 async function loadDownloads(){
   const el = document.getElementById('downloads');
-  el.innerHTML = `
-  <a class='btn btn-outline-primary me-2' href='/job/${JOB_ID}/download/subset_unmatched.fastq'>Download unmatched</a>
-  <p>Selected subset files are named subset_*.fastq in the job folder.</p>`;
+  const data = await (await fetch(`/api/job/${JOB_ID}/downloads`)).json();
+  if (!data.ready || !data.files.length) {
+    el.innerHTML = `<p class="mb-0">No split FASTQ files are available yet.</p>`;
+    return;
+  }
+
+  el.innerHTML = data.files.map(file => `
+    <a class="btn btn-outline-primary me-2 mb-2 sequence-text" href="${file.url}">${file.name}</a>
+  `).join('');
 }
 
 async function init() {
