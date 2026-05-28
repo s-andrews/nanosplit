@@ -115,6 +115,54 @@ def output_label_for_key(key: str, cfg: Dict) -> str:
     return "__".join(labels.get(part, safe_filename_part(part)) for part in parts)
 
 
+def barcode_order_map(cfg: Dict) -> Dict[str, int]:
+    order = {}
+    for i, row in enumerate(cfg.get("named_barcodes", [])):
+        if len(row) < 2:
+            continue
+        barcode = row[1]
+        if not barcode:
+            continue
+        order[barcode] = i
+        order[rc(barcode)] = i
+        order[min(barcode, rc(barcode))] = i
+    return order
+
+
+def preferred_barcode_map(cfg: Dict) -> Dict[str, str]:
+    preferred = {}
+    for row in cfg.get("named_barcodes", []):
+        if len(row) < 2:
+            continue
+        barcode = row[1]
+        if not barcode:
+            continue
+        preferred[barcode] = barcode
+        preferred[rc(barcode)] = barcode
+        preferred[min(barcode, rc(barcode))] = barcode
+    return preferred
+
+
+def canonical_pair_key(left: str, right: str, cfg: Dict) -> Tuple[str, str]:
+    order = barcode_order_map(cfg)
+    preferred = preferred_barcode_map(cfg)
+    left_key = preferred.get(left, left)
+    right_key = preferred.get(right, right)
+    if left_key == right_key:
+        return f"{left_key}|{right_key}", "forward"
+
+    left_order = order.get(left)
+    right_order = order.get(right)
+    if left_order is not None and right_order is not None and left_order != right_order:
+        forward = left_order < right_order
+    else:
+        forward = left_key <= right_key
+
+    if forward:
+        return f"{left_key}|{right_key}", "forward"
+    return f"{right_key}|{left_key}", "reverse"
+
+
 def add_start_barcode(grouped: Dict, lookup: Dict, barcode: str, count: int = 1):
     match = lookup.get(barcode)
     if match is None:
@@ -194,17 +242,40 @@ def filter_and_barcodes(job_dir_s: str, min_len: int, max_len: int):
     update_status(job_dir, "filter_barcodes", "done")
 
 
-def end_match(seq: str, barcode: str) -> Optional[str]:
-    candidates = [barcode, rc(barcode)]
+def barcode_matches_at_start(seq: str, barcode: str, max_offset: int = 3) -> bool:
+    candidates = {barcode, rc(barcode)}
     for offset in (0, 1, 2, 3):
-        if len(seq) < len(barcode) + offset:
+        if offset > max_offset or len(seq) < len(barcode) + offset:
             continue
         frag = seq[offset:offset + len(barcode)]
         if frag in candidates:
-            return frag
-        frag2 = seq[len(seq) - len(barcode) - offset: len(seq) - offset if offset else len(seq)]
+            return True
+    return False
+
+
+def barcode_matches_at_end(seq: str, barcode: str, max_offset: int = 3) -> bool:
+    candidates = {barcode, rc(barcode)}
+    for offset in (0, 1, 2, 3):
+        if offset > max_offset or len(seq) < len(barcode) + offset:
+            continue
+        end = len(seq) - offset if offset else len(seq)
+        frag2 = seq[end - len(barcode):end]
         if frag2 in candidates:
-            return frag2
+            return True
+    return False
+
+
+def selected_barcode_at_start(seq: str, selected: List[str]) -> Optional[str]:
+    for barcode in selected:
+        if barcode_matches_at_start(seq, barcode):
+            return barcode
+    return None
+
+
+def selected_barcode_at_end(seq: str, selected: List[str]) -> Optional[str]:
+    for barcode in selected:
+        if barcode_matches_at_end(seq, barcode):
+            return barcode
     return None
 
 
@@ -213,26 +284,33 @@ def quantitate_final(job_dir_s: str, selected: List[str]):
     update_status(job_dir, "final_quant", "running")
     cfg = load_job(job_dir)
     dual = cfg["barcode_mode"] == "both"
-    counts = Counter()
+    counts = {}
     path = filtered_fastq_path(job_dir, cfg)
     for _, s, _, _ in iter_fastq(path):
-        left = None
-        right = None
-        for b in selected:
-            if left is None and end_match(s, b):
-                left = b
-            if right is None and end_match(s[::-1], b):
-                right = b
+        left = selected_barcode_at_start(s, selected)
+        right = selected_barcode_at_end(s, selected)
         if dual:
             if left and right:
-                counts[f"{left}|{right}"] += 1
+                key, orientation = canonical_pair_key(left, right, cfg)
+                counts.setdefault(key, {"forward": 0, "reverse": 0})
+                counts[key][orientation] += 1
         else:
             if left:
-                counts[left] += 1
-    total = sum(counts.values())
-    rows = [{"key": k, "count": v, "pct": (100.0 * v / total) if total else 0} for k, v in counts.items()]
+                counts.setdefault(left, {"forward": 0, "reverse": 0})
+                counts[left]["forward"] += 1
+    total = sum(v["forward"] + v["reverse"] for v in counts.values())
+    rows = []
+    for k, v in counts.items():
+        count = v["forward"] + v["reverse"]
+        rows.append({
+            "key": k,
+            "forward": v["forward"],
+            "reverse": v["reverse"],
+            "count": count,
+            "pct": (100.0 * count / total) if total else 0,
+        })
     rows.sort(key=lambda x: x["count"], reverse=True)
-    (job_dir / "final_quant.json").write_text(json.dumps({"total": total, "rows": rows}, indent=2))
+    (job_dir / "final_quant.json").write_text(json.dumps({"total": total, "paired": dual, "rows": rows}, indent=2))
     update_status(job_dir, "final_quant", "done")
 
 
@@ -256,14 +334,12 @@ def split_fastq(job_dir_s: str, selected_keys: List[str]):
 
     selected_barcodes = cfg.get("selected_step4", [])
     for h, s, p, q in iter_fastq(filtered_fastq_path(job_dir, cfg)):
-        left = None
-        right = None
-        for b in selected_barcodes:
-            if left is None and end_match(s, b):
-                left = b
-            if right is None and end_match(s[::-1], b):
-                right = b
-        key = f"{left}|{right}" if dual and left and right else left
+        left = selected_barcode_at_start(s, selected_barcodes)
+        right = selected_barcode_at_end(s, selected_barcodes)
+        if dual and left and right:
+            key, _ = canonical_pair_key(left, right, cfg)
+        else:
+            key = left
         target = outs.get(key)
         if target:
             target.write(f"{h}\n{s}\n{p}\n{q}\n")

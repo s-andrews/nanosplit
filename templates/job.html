@@ -16,6 +16,23 @@
     .sequence-text {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
+
+    .selection-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: end;
+    }
+
+    .selection-controls .form-field {
+      flex: 0 1 10rem;
+    }
+
+    .selected-count {
+      color: #495057;
+      font-size: 0.95rem;
+      line-height: 2.375rem;
+    }
   </style>
 </head>
 <body>
@@ -37,19 +54,38 @@
     <h4>Step 4: Barcode abundance at read start</h4>
     <div class="chart-wrap"><canvas id="bcChart"></canvas></div>
     <div class="mt-2">
-      <label>Min count</label><input id="minCount" type="number" class="form-control" value="5">
-      <label>Max bars</label><input id="maxBars" type="number" class="form-control" value="30">
-      <button class="btn btn-primary mt-2" onclick="renderStep4()">Apply filter</button>
-      <div id="step4boxes" class="mt-2"></div>
-      <button class="btn btn-success mt-2" onclick="submitStep4()">Use selected barcodes</button>
+      <div class="selection-controls">
+        <div class="form-field">
+          <label class="form-label mb-1">Min count</label>
+          <input id="minCount" type="number" class="form-control" value="5">
+        </div>
+        <div class="form-field">
+          <label class="form-label mb-1">Max bars</label>
+          <input id="maxBars" type="number" class="form-control" value="30">
+        </div>
+        <button class="btn btn-primary" onclick="renderStep4()">Apply filter</button>
+      </div>
+      <div class="d-flex flex-wrap gap-3 align-items-center mt-2">
+        <button class="btn btn-success" onclick="submitStep4()">Use selected barcodes</button>
+        <span id="step4SelectedCount" class="selected-count">0 selected</span>
+      </div>
     </div>
   </div>
 
   <div class="card p-3 mb-3">
     <h4>Step 5: Final barcode/pair quantitation</h4>
+    <div class="selection-controls mb-2">
+      <div class="form-field">
+        <label class="form-label mb-1">Min count</label>
+        <input id="finalMinCount" type="number" class="form-control" value="1">
+      </div>
+      <button class="btn btn-primary" onclick="renderStep5()">Apply filter</button>
+    </div>
     <div class="chart-wrap"><canvas id="finalChart"></canvas></div>
-    <div id="step5boxes" class="mt-2"></div>
-    <button class="btn btn-success mt-2" onclick="submitStep5()">Split reads using selected final keys</button>
+    <div class="d-flex flex-wrap gap-3 align-items-center mt-2">
+      <button class="btn btn-success" onclick="submitStep5()">Split reads using selected final keys</button>
+      <span id="step5SelectedCount" class="selected-count">0 selected</span>
+    </div>
   </div>
 
   <div class="card p-3">
@@ -61,8 +97,15 @@
 const JOB_ID = "{{ job.job_id }}";
 let lenChart, bcChart, finalChart;
 let step4Data = null;
+let finalData = null;
 let pollTimer = null;
+let selectedStep4 = new Set();
+let selectedStep5 = new Set();
 const SEQUENCE_FONT = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+const SELECTED_FORWARD = 'rgba(54,162,235,0.7)';
+const SELECTED_REVERSE = 'rgba(255,99,132,0.7)';
+const SELECTED_FINAL = 'rgba(54,162,235,0.7)';
+const DESELECTED_BAR = 'rgba(173,181,189,0.35)';
 
 const STEP_LOADERS = {
   lengths: loadLengths,
@@ -119,6 +162,18 @@ function setChartRows(chartId, rowCount) {
   wrap.style.height = `${Math.min(1400, Math.max(360, rowCount * 28 + 80))}px`;
 }
 
+function selectedBarColor(selected, selectedColor) {
+  return selected ? selectedColor : DESELECTED_BAR;
+}
+
+function setCanvasPointer(event, elements) {
+  event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+}
+
+function updateSelectedCount(elementId, count) {
+  document.getElementById(elementId).textContent = `${count} selected`;
+}
+
 async function loadLengths() {
   const data = await (await fetch(`/api/job/${JOB_ID}/lengths`)).json();
   if (!data.ready) return;
@@ -149,18 +204,31 @@ function renderStep4(){
   if (!step4Data || !step4Data.barcodes) return;
   const minCount = +document.getElementById('minCount').value;
   const maxBars = +document.getElementById('maxBars').value;
-  const items = step4Data.barcodes.filter(x=>x.count>=minCount).slice(0,maxBars);
+  const items = step4Data.barcodes.slice(0,maxBars);
   const labels = items.map(x=>x.barcode);
+  selectedStep4 = new Set(items.filter(x=>x.count>=minCount).map(x=>x.barcode));
+  updateSelectedCount('step4SelectedCount', selectedStep4.size);
   setChartRows('bcChart', items.length);
   if (bcChart) bcChart.destroy();
   bcChart = new Chart(document.getElementById('bcChart'), {
     type:'bar',
     data:{labels, datasets:[
-      {label:'Forward %', data:items.map(x=>100*x.forward/step4Data.total), backgroundColor:'rgba(54,162,235,0.7)'},
-      {label:'Reverse %', data:items.map(x=>100*x.reverse/step4Data.total), backgroundColor:'rgba(255,99,132,0.7)'}
+      {label:'Forward %', data:items.map(x=>100*x.forward/step4Data.total), backgroundColor:items.map(x=>selectedBarColor(selectedStep4.has(x.barcode), SELECTED_FORWARD))},
+      {label:'Reverse %', data:items.map(x=>100*x.reverse/step4Data.total), backgroundColor:items.map(x=>selectedBarColor(selectedStep4.has(x.barcode), SELECTED_REVERSE))}
     ]}, options:{
       indexAxis:'y',
       maintainAspectRatio:false,
+      onClick(event, elements) {
+        if (!elements.length) return;
+        const barcode = items[elements[0].index].barcode;
+        if (selectedStep4.has(barcode)) {
+          selectedStep4.delete(barcode);
+        } else {
+          selectedStep4.add(barcode);
+        }
+        updateStep4Selection(items);
+      },
+      onHover: setCanvasPointer,
       scales:{
         x:{stacked:true},
         y:{
@@ -168,44 +236,134 @@ function renderStep4(){
           afterFit(scale) { scale.width = sequenceAxisWidth(labels); },
           ticks:{autoSkip:false, font:{family:SEQUENCE_FONT}}
         }
+      },
+      plugins:{
+        tooltip:{
+          callbacks:{
+            label(context) {
+              const item = items[context.dataIndex];
+              const isForward = context.datasetIndex === 0;
+              const count = isForward ? item.forward : item.reverse;
+              const pct = step4Data.total ? 100 * count / step4Data.total : 0;
+              return `${context.dataset.label}: ${count} (${pct.toFixed(2)}%)`;
+            },
+            footer(context) {
+              const item = items[context[0].dataIndex];
+              return `Total: ${item.count} (${item.pct.toFixed(2)}%)`;
+            }
+          }
+        }
       }
     }
   });
-  const div = document.getElementById('step4boxes');
-  div.innerHTML = items.map(x=>`<label class='me-2 sequence-text'><input type='checkbox' value='${x.barcode}' checked> ${x.barcode}</label>`).join('');
+}
+
+function updateStep4Selection(items) {
+  bcChart.data.datasets[0].backgroundColor = items.map(x=>selectedBarColor(selectedStep4.has(x.barcode), SELECTED_FORWARD));
+  bcChart.data.datasets[1].backgroundColor = items.map(x=>selectedBarColor(selectedStep4.has(x.barcode), SELECTED_REVERSE));
+  updateSelectedCount('step4SelectedCount', selectedStep4.size);
+  bcChart.update();
 }
 
 async function submitStep4() {
-  const selected = [...document.querySelectorAll('#step4boxes input:checked')].map(x=>x.value);
+  const selected = Array.from(selectedStep4);
   await fetch(`/api/job/${JOB_ID}/submit_step4`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
   watchStep('final_quant');
 }
 
 async function loadStep5() {
-  const data = await (await fetch(`/api/job/${JOB_ID}/final_quant`)).json();
-  if (!data.ready) return;
-  const labels = data.rows.map(x=>x.key);
-  setChartRows('finalChart', data.rows.length);
+  finalData = await (await fetch(`/api/job/${JOB_ID}/final_quant`)).json();
+  if (!finalData.ready) return;
+  renderStep5();
+}
+
+function renderStep5() {
+  if (!finalData || !finalData.rows) return;
+  const minCount = +document.getElementById('finalMinCount').value;
+  const items = finalData.rows;
+  const labels = items.map(x=>x.key);
+  selectedStep5 = new Set(items.filter(x=>x.count>=minCount).map(x=>x.key));
+  updateSelectedCount('step5SelectedCount', selectedStep5.size);
+  setChartRows('finalChart', items.length);
   if (finalChart) finalChart.destroy();
+  const datasets = finalData.paired ? [
+    {
+      label:'Forward %',
+      data:items.map(x=>finalData.total ? 100*x.forward/finalData.total : 0),
+      backgroundColor:items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_FORWARD))
+    },
+    {
+      label:'Reverse %',
+      data:items.map(x=>finalData.total ? 100*x.reverse/finalData.total : 0),
+      backgroundColor:items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_REVERSE))
+    }
+  ] : [
+    {
+      label:'%',
+      data:items.map(x=>x.pct),
+      backgroundColor:items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_FINAL))
+    }
+  ];
   finalChart = new Chart(document.getElementById('finalChart'), {
     type:'bar',
-    data:{labels, datasets:[{label:'%', data:data.rows.map(x=>x.pct)}]},
+    data:{labels, datasets},
     options:{
       indexAxis:'y',
       maintainAspectRatio:false,
+      onClick(event, elements) {
+        if (!elements.length) return;
+        const key = items[elements[0].index].key;
+        if (selectedStep5.has(key)) {
+          selectedStep5.delete(key);
+        } else {
+          selectedStep5.add(key);
+        }
+        updateStep5Selection(items);
+      },
+      onHover: setCanvasPointer,
       scales:{
+        x:{stacked:!!finalData.paired},
         y:{
+          stacked:!!finalData.paired,
           afterFit(scale) { scale.width = sequenceAxisWidth(labels); },
           ticks:{autoSkip:false, font:{family:SEQUENCE_FONT}}
+        }
+      },
+      plugins:{
+        tooltip:{
+          callbacks:{
+            label(context) {
+              const item = items[context.dataIndex];
+              if (!finalData.paired) {
+                return `Count: ${item.count} (${item.pct.toFixed(2)}%)`;
+              }
+              const count = context.datasetIndex === 0 ? item.forward : item.reverse;
+              const pct = finalData.total ? 100 * count / finalData.total : 0;
+              return `${context.dataset.label}: ${count} (${pct.toFixed(2)}%)`;
+            },
+            footer(context) {
+              if (!finalData.paired) return '';
+              const item = items[context[0].dataIndex];
+              return `Total: ${item.count} (${item.pct.toFixed(2)}%)`;
+            }
+          }
         }
       }
     }
   });
-  document.getElementById('step5boxes').innerHTML = data.rows.map(x=>`<label class='me-2 sequence-text'><input type='checkbox' value='${x.key}' checked> ${x.key}</label>`).join('');
+}
+
+function updateStep5Selection(items) {
+  finalChart.data.datasets[0].backgroundColor = items.map(x=>selectedBarColor(selectedStep5.has(x.key), finalData.paired ? SELECTED_FORWARD : SELECTED_FINAL));
+  if (finalData.paired && finalChart.data.datasets[1]) {
+    finalChart.data.datasets[1].backgroundColor = items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_REVERSE));
+  }
+  updateSelectedCount('step5SelectedCount', selectedStep5.size);
+  finalChart.update();
 }
 
 async function submitStep5(){
-  const selected = [...document.querySelectorAll('#step5boxes input:checked')].map(x=>x.value);
+  const selected = Array.from(selectedStep5);
   await fetch(`/api/job/${JOB_ID}/submit_step5`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
   watchStep('split');
 }
