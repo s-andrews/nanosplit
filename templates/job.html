@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>NanoSplit Job {{ job.job_id }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+</head>
+<body>
+<div class="container py-3">
+  <h2>Job {{ job.job_id }}</h2>
+  <p><strong>Input:</strong> {{ job.fastq_name }} | Barcode length: {{ job.barcode_length }} | Mode: {{ job.barcode_mode }}</p>
+
+  <div class="card p-3 mb-3">
+    <h4>Step 3: Read length distribution</h4>
+    <canvas id="lenChart" height="120"></canvas>
+    <div class="row mt-3">
+      <div class="col"><input id="minLen" class="form-control" type="number" placeholder="min length"></div>
+      <div class="col"><input id="maxLen" class="form-control" type="number" placeholder="max length"></div>
+      <div class="col"><button class="btn btn-primary" onclick="submitLen()">Submit length filter</button></div>
+    </div>
+  </div>
+
+  <div class="card p-3 mb-3">
+    <h4>Step 4: Barcode abundance at read start</h4>
+    <canvas id="bcChart" height="120"></canvas>
+    <div class="mt-2">
+      <label>Min count</label><input id="minCount" type="number" class="form-control" value="5">
+      <label>Max bars</label><input id="maxBars" type="number" class="form-control" value="30">
+      <button class="btn btn-primary mt-2" onclick="renderStep4()">Apply filter</button>
+      <div id="step4boxes" class="mt-2"></div>
+      <button class="btn btn-success mt-2" onclick="submitStep4()">Use selected barcodes</button>
+    </div>
+  </div>
+
+  <div class="card p-3 mb-3">
+    <h4>Step 5: Final barcode/pair quantitation</h4>
+    <canvas id="finalChart" height="120"></canvas>
+    <div id="step5boxes" class="mt-2"></div>
+    <button class="btn btn-success mt-2" onclick="submitStep5()">Split reads using selected final keys</button>
+  </div>
+
+  <div class="card p-3">
+    <h4>Step 6: Downloads</h4>
+    <div id="downloads"></div>
+  </div>
+</div>
+<script>
+const JOB_ID = "{{ job.job_id }}";
+let lenChart, bcChart, finalChart;
+let step4Data = null;
+
+async function poll() {
+  const st = await (await fetch(`/api/job/${JOB_ID}/status`)).json();
+  if (st.lengths === 'done') loadLengths();
+  if (st.filter_barcodes === 'done') loadStep4();
+  if (st.final_quant === 'done') loadStep5();
+  if (st.split === 'done') loadDownloads();
+}
+
+function histogram(values, bin=100) {
+  const m = Math.max(...values);
+  const bins = new Array(Math.ceil(m/bin)+1).fill(0);
+  for (const v of values) bins[Math.floor(v/bin)]++;
+  return {labels: bins.map((_,i)=>`${i*bin}`), counts: bins};
+}
+
+async function loadLengths() {
+  const data = await (await fetch(`/api/job/${JOB_ID}/lengths`)).json();
+  if (!data.ready) return;
+  const h = histogram(data.lengths, 100);
+  if (lenChart) lenChart.destroy();
+  lenChart = new Chart(document.getElementById('lenChart'), {
+    type:'bar', data:{labels:h.labels, datasets:[{label:'Read count', data:h.counts}]},
+    options:{plugins:{zoom:{zoom:{wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'}}}}
+  });
+}
+
+async function submitLen() {
+  await fetch(`/api/job/${JOB_ID}/submit_length_filter`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({min_len:+minLen.value, max_len:+maxLen.value})});
+}
+
+async function loadStep4() {
+  step4Data = await (await fetch(`/api/job/${JOB_ID}/barcode_step1`)).json();
+  if (!step4Data.ready) return;
+  renderStep4();
+}
+
+function renderStep4(){
+  if (!step4Data || !step4Data.barcodes) return;
+  const minCount = +document.getElementById('minCount').value;
+  const maxBars = +document.getElementById('maxBars').value;
+  const items = step4Data.barcodes.filter(x=>x.count>=minCount).slice(0,maxBars);
+  if (bcChart) bcChart.destroy();
+  bcChart = new Chart(document.getElementById('bcChart'), {
+    type:'bar',
+    data:{labels:items.map(x=>x.barcode), datasets:[
+      {label:'Forward %', data:items.map(x=>100*x.forward/step4Data.total), backgroundColor:'rgba(54,162,235,0.7)'},
+      {label:'Reverse %', data:items.map(x=>100*x.reverse/step4Data.total), backgroundColor:'rgba(255,99,132,0.7)'}
+    ]}, options:{scales:{x:{stacked:true}, y:{stacked:true}}}
+  });
+  const div = document.getElementById('step4boxes');
+  div.innerHTML = items.map(x=>`<label class='me-2'><input type='checkbox' value='${x.barcode}' checked> ${x.barcode}</label>`).join('');
+}
+
+async function submitStep4() {
+  const selected = [...document.querySelectorAll('#step4boxes input:checked')].map(x=>x.value);
+  await fetch(`/api/job/${JOB_ID}/submit_step4`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
+}
+
+async function loadStep5() {
+  const data = await (await fetch(`/api/job/${JOB_ID}/final_quant`)).json();
+  if (!data.ready) return;
+  if (finalChart) finalChart.destroy();
+  finalChart = new Chart(document.getElementById('finalChart'), {type:'bar', data:{labels:data.rows.map(x=>x.key), datasets:[{label:'%', data:data.rows.map(x=>x.pct)}]}});
+  document.getElementById('step5boxes').innerHTML = data.rows.map(x=>`<label class='me-2'><input type='checkbox' value='${x.key}' checked> ${x.key}</label>`).join('');
+}
+
+async function submitStep5(){
+  const selected = [...document.querySelectorAll('#step5boxes input:checked')].map(x=>x.value);
+  await fetch(`/api/job/${JOB_ID}/submit_step5`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
+}
+
+async function loadDownloads(){
+  const el = document.getElementById('downloads');
+  el.innerHTML = `
+  <a class='btn btn-outline-primary me-2' href='/job/${JOB_ID}/download/subset_unmatched.fastq'>Download unmatched</a>
+  <p>Selected subset files are named subset_*.fastq in the job folder.</p>`;
+}
+
+setInterval(poll, 2000);
+poll();
+</script>
+</body>
+</html>
