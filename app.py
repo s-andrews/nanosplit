@@ -115,6 +115,21 @@ def output_label_for_key(key: str, cfg: Dict) -> str:
     return "__".join(labels.get(part, safe_filename_part(part)) for part in parts)
 
 
+def add_start_barcode(grouped: Dict, lookup: Dict, barcode: str, count: int = 1):
+    match = lookup.get(barcode)
+    if match is None:
+        key = barcode
+        grouped[key] = {"forward": 0, "reverse": 0}
+        lookup[barcode] = (key, "forward")
+        reverse = rc(barcode)
+        if reverse != barcode:
+            lookup[reverse] = (key, "reverse")
+        match = lookup[barcode]
+
+    key, orientation = match
+    grouped[key][orientation] += count
+
+
 def unique_filename(filename: str, used: set) -> str:
     path = Path(filename)
     candidate = filename
@@ -154,7 +169,8 @@ def filter_and_barcodes(job_dir_s: str, min_len: int, max_len: int):
     save_job(job_dir, cfg)
     out_path = filtered_fastq_path(job_dir, cfg)
     bc_len = int(cfg["barcode_length"])
-    c = Counter()
+    grouped = {}
+    barcode_lookup = {}
     total = 0
     with open(out_path, "wt") as out:
         for h, s, p, q in iter_fastq(in_path):
@@ -162,15 +178,7 @@ def filter_and_barcodes(job_dir_s: str, min_len: int, max_len: int):
             if min_len <= l <= max_len:
                 total += 1
                 out.write(f"{h}\n{s}\n{p}\n{q}\n")
-                c[s[:bc_len]] += 1
-    grouped = {}
-    for b, n in c.items():
-        key = min(b, rc(b))
-        grouped.setdefault(key, {"forward": 0, "reverse": 0})
-        if b == key:
-            grouped[key]["forward"] += n
-        else:
-            grouped[key]["reverse"] += n
+                add_start_barcode(grouped, barcode_lookup, s[:bc_len])
     barcodes = []
     for k, v in grouped.items():
         count = v["forward"] + v["reverse"]

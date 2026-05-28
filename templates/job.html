@@ -122,11 +122,15 @@ function setChartRows(chartId, rowCount) {
 async function loadLengths() {
   const data = await (await fetch(`/api/job/${JOB_ID}/lengths`)).json();
   if (!data.ready) return;
-  const h = histogram(data.lengths, 100);
+  const h = histogram(data.lengths, 50);
   if (lenChart) lenChart.destroy();
   lenChart = new Chart(document.getElementById('lenChart'), {
     type:'bar', data:{labels:h.labels, datasets:[{label:'Read count', data:h.counts}]},
-    options:{maintainAspectRatio:false, plugins:{zoom:{zoom:{wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'}}}}
+    options:{
+      maintainAspectRatio:false,
+      scales:{x:{ticks:{autoSkip:true, maxTicksLimit:20}}},
+      plugins:{zoom:{zoom:{wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'}}}
+    }
   });
 }
 
