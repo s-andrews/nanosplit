@@ -6,6 +6,13 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <style>
+    .chart-wrap {
+      height: 360px;
+      position: relative;
+      width: 100%;
+    }
+  </style>
 </head>
 <body>
 <div class="container py-3">
@@ -14,7 +21,7 @@
 
   <div class="card p-3 mb-3">
     <h4>Step 3: Read length distribution</h4>
-    <canvas id="lenChart" height="120"></canvas>
+    <div class="chart-wrap"><canvas id="lenChart"></canvas></div>
     <div class="row mt-3">
       <div class="col"><input id="minLen" class="form-control" type="number" placeholder="min length"></div>
       <div class="col"><input id="maxLen" class="form-control" type="number" placeholder="max length"></div>
@@ -24,7 +31,7 @@
 
   <div class="card p-3 mb-3">
     <h4>Step 4: Barcode abundance at read start</h4>
-    <canvas id="bcChart" height="120"></canvas>
+    <div class="chart-wrap"><canvas id="bcChart"></canvas></div>
     <div class="mt-2">
       <label>Min count</label><input id="minCount" type="number" class="form-control" value="5">
       <label>Max bars</label><input id="maxBars" type="number" class="form-control" value="30">
@@ -36,7 +43,7 @@
 
   <div class="card p-3 mb-3">
     <h4>Step 5: Final barcode/pair quantitation</h4>
-    <canvas id="finalChart" height="120"></canvas>
+    <div class="chart-wrap"><canvas id="finalChart"></canvas></div>
     <div id="step5boxes" class="mt-2"></div>
     <button class="btn btn-success mt-2" onclick="submitStep5()">Split reads using selected final keys</button>
   </div>
@@ -50,13 +57,44 @@
 const JOB_ID = "{{ job.job_id }}";
 let lenChart, bcChart, finalChart;
 let step4Data = null;
+let pollTimer = null;
 
-async function poll() {
-  const st = await (await fetch(`/api/job/${JOB_ID}/status`)).json();
-  if (st.lengths === 'done') loadLengths();
-  if (st.filter_barcodes === 'done') loadStep4();
-  if (st.final_quant === 'done') loadStep5();
-  if (st.split === 'done') loadDownloads();
+const STEP_LOADERS = {
+  lengths: loadLengths,
+  filter_barcodes: loadStep4,
+  final_quant: loadStep5,
+  split: loadDownloads,
+};
+
+async function fetchStatus() {
+  return (await fetch(`/api/job/${JOB_ID}/status`, {cache: 'no-store'})).json();
+}
+
+function firstActiveStep(status) {
+  return Object.keys(STEP_LOADERS).find(step => ['queued', 'running'].includes(status[step]));
+}
+
+async function renderCompleted(status) {
+  for (const [step, load] of Object.entries(STEP_LOADERS)) {
+    if (status[step] === 'done') await load();
+  }
+}
+
+function watchStep(step) {
+  if (pollTimer) clearInterval(pollTimer);
+  if (!step) return;
+
+  const check = async () => {
+    const status = await fetchStatus();
+    if (status[step] === 'done') {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      window.location.reload();
+    }
+  };
+
+  pollTimer = setInterval(check, 2000);
+  check();
 }
 
 function histogram(values, bin=100) {
@@ -73,12 +111,13 @@ async function loadLengths() {
   if (lenChart) lenChart.destroy();
   lenChart = new Chart(document.getElementById('lenChart'), {
     type:'bar', data:{labels:h.labels, datasets:[{label:'Read count', data:h.counts}]},
-    options:{plugins:{zoom:{zoom:{wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'}}}}
+    options:{maintainAspectRatio:false, plugins:{zoom:{zoom:{wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'}}}}
   });
 }
 
 async function submitLen() {
   await fetch(`/api/job/${JOB_ID}/submit_length_filter`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({min_len:+minLen.value, max_len:+maxLen.value})});
+  watchStep('filter_barcodes');
 }
 
 async function loadStep4() {
@@ -98,7 +137,7 @@ function renderStep4(){
     data:{labels:items.map(x=>x.barcode), datasets:[
       {label:'Forward %', data:items.map(x=>100*x.forward/step4Data.total), backgroundColor:'rgba(54,162,235,0.7)'},
       {label:'Reverse %', data:items.map(x=>100*x.reverse/step4Data.total), backgroundColor:'rgba(255,99,132,0.7)'}
-    ]}, options:{scales:{x:{stacked:true}, y:{stacked:true}}}
+    ]}, options:{maintainAspectRatio:false, scales:{x:{stacked:true}, y:{stacked:true}}}
   });
   const div = document.getElementById('step4boxes');
   div.innerHTML = items.map(x=>`<label class='me-2'><input type='checkbox' value='${x.barcode}' checked> ${x.barcode}</label>`).join('');
@@ -107,19 +146,21 @@ function renderStep4(){
 async function submitStep4() {
   const selected = [...document.querySelectorAll('#step4boxes input:checked')].map(x=>x.value);
   await fetch(`/api/job/${JOB_ID}/submit_step4`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
+  watchStep('final_quant');
 }
 
 async function loadStep5() {
   const data = await (await fetch(`/api/job/${JOB_ID}/final_quant`)).json();
   if (!data.ready) return;
   if (finalChart) finalChart.destroy();
-  finalChart = new Chart(document.getElementById('finalChart'), {type:'bar', data:{labels:data.rows.map(x=>x.key), datasets:[{label:'%', data:data.rows.map(x=>x.pct)}]}});
+  finalChart = new Chart(document.getElementById('finalChart'), {type:'bar', data:{labels:data.rows.map(x=>x.key), datasets:[{label:'%', data:data.rows.map(x=>x.pct)}]}, options:{maintainAspectRatio:false}});
   document.getElementById('step5boxes').innerHTML = data.rows.map(x=>`<label class='me-2'><input type='checkbox' value='${x.key}' checked> ${x.key}</label>`).join('');
 }
 
 async function submitStep5(){
   const selected = [...document.querySelectorAll('#step5boxes input:checked')].map(x=>x.value);
   await fetch(`/api/job/${JOB_ID}/submit_step5`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
+  watchStep('split');
 }
 
 async function loadDownloads(){
@@ -129,8 +170,13 @@ async function loadDownloads(){
   <p>Selected subset files are named subset_*.fastq in the job folder.</p>`;
 }
 
-setInterval(poll, 2000);
-poll();
+async function init() {
+  const status = await fetchStatus();
+  await renderCompleted(status);
+  watchStep(firstActiveStep(status));
+}
+
+init();
 </script>
 </body>
 </html>
