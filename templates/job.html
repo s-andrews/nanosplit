@@ -99,6 +99,7 @@
 </div>
 <script>
 const JOB_ID = "{{ job.job_id }}";
+const APP_ROOT = "{{ request.script_root }}";
 let lenChart, bcChart, finalChart;
 let step4Data = null;
 let finalData = null;
@@ -119,7 +120,7 @@ const STEP_LOADERS = {
 };
 
 async function fetchStatus() {
-  return (await fetch(`/api/job/${JOB_ID}/status`, {cache: 'no-store'})).json();
+  return (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/status`, {cache: 'no-store'})).json();
 }
 
 function firstActiveStep(status) {
@@ -179,7 +180,7 @@ function updateSelectedCount(elementId, count) {
 }
 
 async function loadLengths() {
-  const data = await (await fetch(`/api/job/${JOB_ID}/lengths`)).json();
+  const data = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/lengths`)).json();
   if (!data.ready) return;
   const h = histogram(data.lengths, 50);
   if (lenChart) lenChart.destroy();
@@ -194,12 +195,12 @@ async function loadLengths() {
 }
 
 async function submitLen() {
-  await fetch(`/api/job/${JOB_ID}/submit_length_filter`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({min_len:+minLen.value, max_len:+maxLen.value})});
+  await fetch(`${APP_ROOT}/api/job/${JOB_ID}/submit_length_filter`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({min_len:+minLen.value, max_len:+maxLen.value})});
   watchStep('filter_barcodes');
 }
 
 async function loadStep4() {
-  step4Data = await (await fetch(`/api/job/${JOB_ID}/barcode_step1`)).json();
+  step4Data = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/barcode_step1`)).json();
   if (!step4Data.ready) return;
   renderStep4();
 }
@@ -271,12 +272,12 @@ function updateStep4Selection(items) {
 
 async function submitStep4() {
   const selected = Array.from(selectedStep4);
-  await fetch(`/api/job/${JOB_ID}/submit_step4`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
+  await fetch(`${APP_ROOT}/api/job/${JOB_ID}/submit_step4`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
   watchStep('final_quant');
 }
 
 async function loadStep5() {
-  finalData = await (await fetch(`/api/job/${JOB_ID}/final_quant`)).json();
+  finalData = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/final_quant`)).json();
   if (!finalData.ready) return;
   renderStep5();
 }
@@ -369,13 +370,13 @@ function updateStep5Selection(items) {
 
 async function submitStep5(){
   const selected = Array.from(selectedStep5);
-  await fetch(`/api/job/${JOB_ID}/submit_step5`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
+  await fetch(`${APP_ROOT}/api/job/${JOB_ID}/submit_step5`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({selected})});
   watchStep('split');
 }
 
 async function loadDownloads(){
   const el = document.getElementById('downloads');
-  const data = await (await fetch(`/api/job/${JOB_ID}/downloads`)).json();
+  const data = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/downloads`)).json();
   if (!data.ready || !data.files.length) {
     el.innerHTML = `<p class="mb-0">No split FASTQ files are available yet.</p>`;
     return;
