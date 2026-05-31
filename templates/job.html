@@ -14,7 +14,7 @@
   <p><strong>Input:</strong> {{ job.fastq_name }} | Barcode length: {{ job.barcode_length }} | Mode: {{ job.barcode_mode }}</p>
 
   <div class="card p-3 mb-3">
-    <h4>Step 3: Read length distribution</h4>
+    <h4>Step 1: Filter Reads by Length</h4>
     <div class="chart-wrap"><canvas id="lenChart"></canvas></div>
     <div class="row mt-3">
       <div class="col"><input id="minLen" class="form-control" type="number" placeholder="min length"></div>
@@ -24,7 +24,7 @@
   </div>
 
   <div class="card p-3 mb-3">
-    <h4>Step 4: Barcode abundance at read start</h4>
+    <h4>Step 2: Select Putative Barcodes</h4>
     <div class="chart-wrap"><canvas id="bcChart"></canvas></div>
     <div class="mt-2">
       <div class="selection-controls">
@@ -46,7 +46,7 @@
   </div>
 
   <div class="card p-3 mb-3">
-    <h4>Step 5: Final barcode/pair quantitation</h4>
+    <h4>Step 3: Select final barcode combinations</h4>
     <div class="chart-wrap"><canvas id="finalChart"></canvas></div>
     <div class="selection-controls mt-2">
       <div class="form-field">
@@ -66,7 +66,7 @@
   </div>
 
   <div class="card p-3">
-    <h4>Step 6: Downloads</h4>
+    <h4>Step 4: Download Results</h4>
     <div id="downloads"></div>
   </div>
 </div>
