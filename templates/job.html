@@ -4,36 +4,9 @@
   <meta charset="utf-8">
   <title>NanoSplit Job {{ job.job_id }}</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='app.css') }}" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-  <style>
-    .chart-wrap {
-      height: 360px;
-      position: relative;
-      width: 100%;
-    }
-
-    .sequence-text {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    }
-
-    .selection-controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: end;
-    }
-
-    .selection-controls .form-field {
-      flex: 0 1 10rem;
-    }
-
-    .selected-count {
-      color: #495057;
-      font-size: 0.95rem;
-      line-height: 2.375rem;
-    }
-  </style>
 </head>
 <body>
 <div class="container py-3">
@@ -100,6 +73,7 @@
 <script>
 const JOB_ID = "{{ job.job_id }}";
 const APP_ROOT = "{{ request.script_root }}";
+const NAMED_BARCODES = {{ job.named_barcodes|tojson }};
 let lenChart, bcChart, finalChart;
 let step4Data = null;
 let finalData = null;
@@ -179,6 +153,61 @@ function updateSelectedCount(elementId, count) {
   document.getElementById(elementId).textContent = `${count} selected`;
 }
 
+function reverseComplement(seq) {
+  const table = {A:'T', C:'G', G:'C', T:'A', N:'N', a:'t', c:'g', g:'c', t:'a', n:'n'};
+  return seq.split('').reverse().map(base => table[base] || base).join('');
+}
+
+function namedBarcodeEntries() {
+  return NAMED_BARCODES.flatMap(row => {
+    const name = row[0];
+    return row.slice(1).filter(Boolean).map(barcode => ({name, barcode}));
+  }).filter(entry => entry.name && entry.barcode);
+}
+
+function barcodeMatchesExpected(barcode) {
+  return namedBarcodeEntries().some(entry => barcode === entry.barcode || barcode === reverseComplement(entry.barcode));
+}
+
+function barcodeName(barcode) {
+  const entry = namedBarcodeEntries().find(item => barcode === item.barcode || barcode === reverseComplement(item.barcode));
+  return entry ? entry.name : null;
+}
+
+function step4Label(barcode) {
+  return `${barcodeMatchesExpected(barcode) ? 'expected' : 'unexpected'}  ${barcode}`;
+}
+
+function pairedName(key) {
+  const parts = key.split('|');
+  if (parts.length !== 2) return null;
+
+  const matchingRow = NAMED_BARCODES.find(row => {
+    if (row.length < 3) return false;
+    const expected = row.slice(1).filter(Boolean);
+    if (expected.length !== 2) return false;
+    const leftMatchesFirst = parts[0] === expected[0] || parts[0] === reverseComplement(expected[0]);
+    const rightMatchesSecond = parts[1] === expected[1] || parts[1] === reverseComplement(expected[1]);
+    const leftMatchesSecond = parts[0] === expected[1] || parts[0] === reverseComplement(expected[1]);
+    const rightMatchesFirst = parts[1] === expected[0] || parts[1] === reverseComplement(expected[0]);
+    return (leftMatchesFirst && rightMatchesSecond) || (leftMatchesSecond && rightMatchesFirst);
+  });
+  return matchingRow ? matchingRow[0] : null;
+}
+
+function step5Label(key) {
+  if (finalData && finalData.paired) {
+    const pairName = pairedName(key);
+    return pairName ? `${pairName}  ${key}` : key;
+  }
+
+  const parts = key.split('|');
+  return parts.map(part => {
+    const name = barcodeName(part);
+    return name ? `${name} ${part}` : part;
+  }).join('|');
+}
+
 async function loadLengths() {
   const data = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/lengths`)).json();
   if (!data.ready) return;
@@ -210,7 +239,7 @@ function renderStep4(){
   const minCount = +document.getElementById('minCount').value;
   const maxBars = +document.getElementById('maxBars').value;
   const items = step4Data.barcodes.slice(0,maxBars);
-  const labels = items.map(x=>x.barcode);
+  const labels = items.map(x=>step4Label(x.barcode));
   selectedStep4 = new Set(items.filter(x=>x.count>=minCount).map(x=>x.barcode));
   updateSelectedCount('step4SelectedCount', selectedStep4.size);
   setChartRows('bcChart', items.length);
@@ -245,6 +274,9 @@ function renderStep4(){
       plugins:{
         tooltip:{
           callbacks:{
+            title(context) {
+              return labels[context[0].dataIndex];
+            },
             label(context) {
               const item = items[context.dataIndex];
               const isForward = context.datasetIndex === 0;
@@ -287,7 +319,7 @@ function renderStep5() {
   const minCount = +document.getElementById('finalMinCount').value;
   const maxBars = +document.getElementById('finalMaxBars').value;
   const items = finalData.rows.slice(0,maxBars);
-  const labels = items.map(x=>x.key);
+  const labels = items.map(x=>step5Label(x.key));
   selectedStep5 = new Set(items.filter(x=>x.count>=minCount).map(x=>x.key));
   updateSelectedCount('step5SelectedCount', selectedStep5.size);
   setChartRows('finalChart', items.length);
@@ -338,6 +370,9 @@ function renderStep5() {
       plugins:{
         tooltip:{
           callbacks:{
+            title(context) {
+              return labels[context[0].dataIndex];
+            },
             label(context) {
               const item = items[context.dataIndex];
               if (!finalData.paired) {

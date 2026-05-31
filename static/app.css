@@ -1,0 +1,41 @@
+h1,h2,h3 {
+    font-family: 'Consolas','Courier New', Courier, monospace;
+    margin-top: 0.2em;
+}
+
+.darkbg {
+    background-color: #aa8800ff;
+    color: white;
+}
+
+
+.form-shell {
+  max-width: 760px;
+}
+
+.chart-wrap {
+  height: 360px;
+  position: relative;
+  width: 100%;
+}
+
+.sequence-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.selection-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.selection-controls .form-field {
+  flex: 0 1 10rem;
+}
+
+.selected-count {
+  color: #495057;
+  font-size: 0.95rem;
+  line-height: 2.375rem;
+}
