@@ -386,22 +386,16 @@ function renderStep5() {
   updateSelectedCount('step5SelectedCount', selectedStep5.size);
   setChartRows('finalChart', items.length);
   if (finalChart) finalChart.destroy();
-  const datasets = finalData.paired ? [
+  const datasets = [
     {
       label:'Forward %',
-      data:items.map(x=>finalData.total ? 100*x.forward/finalData.total : 0),
+      data:items.map(x=>finalData.total ? 100*(x.forward || 0)/finalData.total : 0),
       backgroundColor:items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_FORWARD))
     },
     {
       label:'Reverse %',
-      data:items.map(x=>finalData.total ? 100*x.reverse/finalData.total : 0),
+      data:items.map(x=>finalData.total ? 100*(x.reverse || 0)/finalData.total : 0),
       backgroundColor:items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_REVERSE))
-    }
-  ] : [
-    {
-      label:'%',
-      data:items.map(x=>x.pct),
-      backgroundColor:items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_FINAL))
     }
   ];
   finalChart = new Chart(document.getElementById('finalChart'), {
@@ -422,9 +416,9 @@ function renderStep5() {
       },
       onHover: setCanvasPointer,
       scales:{
-        x:{stacked:!!finalData.paired},
+        x:{stacked:true},
         y:{
-          stacked:!!finalData.paired,
+          stacked:true,
           afterFit(scale) { scale.width = sequenceAxisWidth(labels); },
           ticks:{autoSkip:false, font:{family:SEQUENCE_FONT}}
         }
@@ -437,15 +431,11 @@ function renderStep5() {
             },
             label(context) {
               const item = items[context.dataIndex];
-              if (!finalData.paired) {
-                return `Count: ${item.count} (${item.pct.toFixed(2)}%)`;
-              }
-              const count = context.datasetIndex === 0 ? item.forward : item.reverse;
+              const count = context.datasetIndex === 0 ? (item.forward || 0) : (item.reverse || 0);
               const pct = finalData.total ? 100 * count / finalData.total : 0;
               return `${context.dataset.label}: ${count} (${pct.toFixed(2)}%)`;
             },
             footer(context) {
-              if (!finalData.paired) return '';
               const item = items[context[0].dataIndex];
               return `Total: ${item.count} (${item.pct.toFixed(2)}%)`;
             }
@@ -457,10 +447,8 @@ function renderStep5() {
 }
 
 function updateStep5Selection(items) {
-  finalChart.data.datasets[0].backgroundColor = items.map(x=>selectedBarColor(selectedStep5.has(x.key), finalData.paired ? SELECTED_FORWARD : SELECTED_FINAL));
-  if (finalData.paired && finalChart.data.datasets[1]) {
-    finalChart.data.datasets[1].backgroundColor = items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_REVERSE));
-  }
+  finalChart.data.datasets[0].backgroundColor = items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_FORWARD));
+  finalChart.data.datasets[1].backgroundColor = items.map(x=>selectedBarColor(selectedStep5.has(x.key), SELECTED_REVERSE));
   updateSelectedCount('step5SelectedCount', selectedStep5.size);
   finalChart.update();
 }

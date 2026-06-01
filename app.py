@@ -415,6 +415,9 @@ def quantitate_final(job_dir_s: str, selected: List[str]):
             if left:
                 counts.setdefault(left, {"forward": 0, "reverse": 0})
                 counts[left]["forward"] += 1
+            if right:
+                counts.setdefault(right, {"forward": 0, "reverse": 0})
+                counts[right]["reverse"] += 1
     total = sum(v["forward"] + v["reverse"] for v in counts.values())
     rows = []
     for k, v in counts.items():
@@ -457,7 +460,7 @@ def split_fastq(job_dir_s: str, selected_keys: List[str]):
         if dual and left and right:
             key, _ = canonical_pair_key(left, right, cfg)
         else:
-            key = left
+            key = left or right
         target = outs.get(key)
         if target:
             target.write(f"{h}\n{s}\n{p}\n{q}\n")
