@@ -1,8 +1,8 @@
-# NanoSplit
+<img src="../main/www/static/images/nanosplit_log_path.svg?raw=true" alt="NanoSplit Logo" width="100%">
 
-NanoSplit is a Flask web application for splitting mixed nanopore FASTQ reads by barcode. It guides a user through upload, read-length filtering, barcode discovery, final barcode or barcode-pair quantitation, and download of split FASTQ files.
+NanoSplit is a web application for splitting mixed nanopore FastQ reads by barcode. It guides you through uploading sequences, read-length filtering, barcode discovery, final barcode or barcode-pair quantitation, and download of split FastQ files.
 
-## Functionality
+## Workflow
 
 NanoSplit provides a browser-based workflow:
 
