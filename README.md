@@ -2,25 +2,55 @@
 
 NanoSplit is a web application for splitting mixed nanopore FastQ reads by barcode. It guides you through uploading sequences, read-length filtering, barcode discovery, final barcode or barcode-pair quantitation, and download of split FastQ files.
 
-## Workflow
+# Using the program
 
-NanoSplit provides a browser-based workflow:
+Nanosplit runs you through a guided workflow:
 
-1. Upload a `.fastq`, `.fq`, `.fastq.gz`, or `.fq.gz` file.
-2. Choose barcode length and whether reads should be matched at one end or both ends.
-3. Review the read-length distribution and submit a length filter.
-4. Review barcode abundance at the start of reads.
-   - Barcode sequences are plotted as horizontal bars.
-   - Selected barcodes can be controlled directly from the plot.
-   - A selected barcode also represents its reverse complement.
-5. Review final barcode or barcode-pair abundance.
-   - Paired barcode results merge opposite orientations into stacked forward/reverse bars.
-   - Barcode pairs can include the same barcode at both ends.
-6. Download split FASTQ files individually or as a ZIP archive.
+## Data Loading and Job Setup
 
-Job files are stored under the local `data/` directory. Output filenames are based on the uploaded filename, with barcode names and sequences appended where available.
+![Data Loading](Screenshots/load_data.png)
 
-## Local Development
+On the front screen you need to upload your FastQ file and tell the program about your barcodes.  This system is designed for small-scale nanopore experiments (thousands of sequences), such as those used to sequence PCR products or plasmids, not to split large sequencing runs (millions of sequences).
+
+Your fastq file can be gzipped or uncompressed.
+
+You need to tell us the length of your barcodes in bp.  It assumes all barcodes are the same length.  You can also say whether you have barcodes at just one end of your sequences, or at both ends.
+
+Finally, you can tell the program which barcodes, or barcode combinations, you expect to see, and you can tell it the name you want to associate with these sequences.  This is optional.
+
+
+## Read Length Filtering
+
+![Length Filtering](Screenshots/filter_length.png)
+
+Your sequencing run may contain some off-target sequences of a different size to the one you're expecting.  Nanopore sequencers also tend to produce multimeric sequences which have 2 or more reads concatenated.  To remove these artefacts the program will show you a graph of the distribution of observed read lengths in your file and allow you to set a filter on the minimum and maximum length of sequence to carry forward.
+
+You can zoom in and out of the graph by putting your cursor into the graph and scrolling.
+
+## Initial Barcode Selection
+![Initial Barcode Selection](Screenshots/select_barcodes.png)
+
+The program will initially look only at the start of your reads to try to discover barcodes.  It uses the 
+front as the end of reads tends to be more unstable in nanpore sequencing and have spurious bases added, so this gives a cleaner result.
+
+You will see the graph of observed barcodes along with their frequency in the full dataset.  At the bottom you can set a filter for the minimum count for barocdes you want to carry through to the next step.  You can also click on the bar for individual barcodes to add or remove it from the selected set.
+
+
+## Final Barcode(s) Selection
+![Final Barcode Selection](Screenshots/final_selection.png)
+
+The program will now do a more sensitive search for barcodes using the barcodes you selected in the previous step.  If you said that the library had barcodes at both ends it will search for combinations of barcodes.  If you told the program about the barcodes you were expecting then it will match the barcodes it finds to the expected set and will label the barcode(s) with the sample names you provided.
+
+Again you can filter the barcodes shown to just the subset you finally want to use to split your file.
+
+## Final Splitting
+![Barcode Splitting](Screenshots/download_split_sequences.png)
+
+Finally you can use the selected barcode combinations to split your fastq file.  You can download the split files individually, or you can download a zip file containing all of the split subsets (including a file with the unmatched sequences in it).
+
+# Local Installation
+
+If you want to run your own copy of the program you use use the instructions below to install it on your own server.  You are free to modify the code under the terms of the GPL open source license.
 
 Install Python 3.10 or newer, then create a virtual environment:
 
@@ -38,7 +68,9 @@ python app.py
 
 Open `http://127.0.0.1:5000/`.
 
-## Linux Server Installation
+# Production Installation
+
+If you want to install the program to provide a service to others on your server then the instructions below will make a more robust and scalable installation of the software.
 
 These commands assume the application will live at `/opt/nanosplit`, run as user `www-data`, and listen locally on port `8050`.
 
