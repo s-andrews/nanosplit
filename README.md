@@ -2,6 +2,8 @@
 
 NanoSplit is a web application for splitting mixed nanopore FastQ reads by barcode. It guides you through uploading sequences, read-length filtering, barcode discovery, final barcode or barcode-pair quantitation, and download of split FastQ files.
 
+You can run nanosplit from our server at ![https://www.bioinformatics.babraham.ac.uk/nanosplit/](https://www.bioinformatics.babraham.ac.uk/nanosplit/).  There are instructions further down the page if you want to run the system on your own server.
+
 # Using the program
 
 Nanosplit runs you through a guided workflow:
