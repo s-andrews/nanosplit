@@ -83,6 +83,14 @@
       <button class="btn btn-success" onclick="submitStep5()">Split reads using selected barcodes</button>
       <span id="step5SelectedCount" class="selected-count">0 selected</span>
     </div>
+
+    <p class="mt-3">
+      Pick the final set of barcodes, or barcode combinations, to use. Your nanopore library is likely
+      to be non-directional so you'd expect to see a pretty even mix of forward and reverse matches for
+      real combinations.  Again, you can set the min count to filter the barcodes to use, and can click 
+      on individual bars to toggle them on and off.
+    </p>
+
   </div>
 
   <div id="step-downloads" class="card p-3">
@@ -101,9 +109,9 @@ let pollTimer = null;
 let selectedStep4 = new Set();
 let selectedStep5 = new Set();
 const SEQUENCE_FONT = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-const SELECTED_FORWARD = 'rgba(54,162,235,0.7)';
-const SELECTED_REVERSE = 'rgba(255,99,132,0.7)';
-const SELECTED_FINAL = 'rgba(54,162,235,0.7)';
+const SELECTED_FORWARD = 'rgba(72,145,106,0.75)';
+const SELECTED_REVERSE = 'rgba(168,83,136,0.75)';
+const SELECTED_FINAL = 'rgba(72,145,106,0.75)';
 const DESELECTED_BAR = 'rgba(173,181,189,0.35)';
 
 const STEP_LOADERS = {
@@ -118,9 +126,29 @@ const STEP_TARGETS = {
   final_quant: 'step-final',
   split: 'step-downloads',
 };
+const STEP_READY_CHECKS = {
+  lengths: () => resultReady(`${APP_ROOT}/api/job/${JOB_ID}/lengths`),
+  filter_barcodes: () => resultReady(`${APP_ROOT}/api/job/${JOB_ID}/barcode_step1`),
+  final_quant: () => resultReady(`${APP_ROOT}/api/job/${JOB_ID}/final_quant`),
+  split: () => resultReady(`${APP_ROOT}/api/job/${JOB_ID}/downloads`, data => data.ready && data.files && data.files.length > 0),
+};
 
 async function fetchStatus() {
   return (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/status`, {cache: 'no-store'})).json();
+}
+
+async function resultReady(url, predicate = data => data.ready) {
+  try {
+    const data = await (await fetch(url, {cache: 'no-store'})).json();
+    return predicate(data);
+  } catch {
+    return false;
+  }
+}
+
+async function stepResultReady(step) {
+  const check = STEP_READY_CHECKS[step];
+  return check ? check() : true;
 }
 
 function firstActiveStep(status) {
@@ -129,7 +157,10 @@ function firstActiveStep(status) {
 
 async function renderCompleted(status) {
   for (const [step, load] of Object.entries(STEP_LOADERS)) {
-    if (status[step] === 'done') await load();
+    if (status[step] === 'done') {
+      const ready = await load();
+      if (!ready) watchStep(step);
+    }
   }
 }
 
@@ -139,7 +170,7 @@ function watchStep(step) {
 
   const check = async () => {
     const status = await fetchStatus();
-    if (status[step] === 'done') {
+    if (status[step] === 'done' && await stepResultReady(step)) {
       clearInterval(pollTimer);
       pollTimer = null;
       const target = STEP_TARGETS[step];
@@ -238,7 +269,7 @@ function step5Label(key) {
 
 async function loadLengths() {
   const data = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/lengths`)).json();
-  if (!data.ready) return;
+  if (!data.ready) return false;
   const h = histogram(data.lengths, 50);
   if (lenChart) lenChart.destroy();
   lenChart = new Chart(document.getElementById('lenChart'), {
@@ -249,6 +280,7 @@ async function loadLengths() {
       plugins:{zoom:{zoom:{wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'}}}
     }
   });
+  return true;
 }
 
 async function submitLen() {
@@ -258,8 +290,9 @@ async function submitLen() {
 
 async function loadStep4() {
   step4Data = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/barcode_step1`)).json();
-  if (!step4Data.ready) return;
+  if (!step4Data.ready) return false;
   renderStep4();
+  return true;
 }
 
 function renderStep4(){
@@ -338,8 +371,9 @@ async function submitStep4() {
 
 async function loadStep5() {
   finalData = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/final_quant`)).json();
-  if (!finalData.ready) return;
+  if (!finalData.ready) return false;
   renderStep5();
+  return true;
 }
 
 function renderStep5() {
@@ -442,7 +476,7 @@ async function loadDownloads(){
   const data = await (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/downloads`)).json();
   if (!data.ready || !data.files.length) {
     el.innerHTML = `<p class="mb-0">No split FASTQ files are available yet.</p>`;
-    return;
+    return false;
   }
 
   el.innerHTML = `
@@ -457,6 +491,7 @@ async function loadDownloads(){
       `).join('')}
     </ul>
   `;
+  return true;
 }
 
 async function init() {

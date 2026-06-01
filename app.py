@@ -55,14 +55,27 @@ def iter_fastq(path: Path) -> Iterable[Tuple[str, str, str, str]]:
 
 
 def save_job(job_dir: Path, config: Dict):
-    (job_dir / "job.json").write_text(json.dumps(config, indent=2))
+    write_json_file(job_dir / "job.json", config, indent=2)
 
 
 def load_job(job_dir: Path) -> Dict:
     p = job_dir / "job.json"
     if not p.exists():
         return {}
-    return json.loads(p.read_text())
+    return read_json_file(p, {})
+
+
+def read_json_file(path: Path, default=None):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def write_json_file(path: Path, data, indent=None):
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=indent))
+    os.replace(tmp, path)
 
 
 def output_base_name(filename: str) -> str:
@@ -272,12 +285,25 @@ def delete_existing_split_files(job_dir: Path, cfg: Dict):
 
 
 def update_status(job_dir: Path, step: str, status: str):
-    st = {}
     sp = job_dir / "status.json"
-    if sp.exists():
-        st = json.loads(sp.read_text())
+    st = read_json_file(sp, {}) if sp.exists() else {}
     st[step] = status
-    sp.write_text(json.dumps(st, indent=2))
+    write_json_file(sp, st, indent=2)
+
+
+def clear_statuses(job_dir: Path, steps: List[str]):
+    sp = job_dir / "status.json"
+    st = read_json_file(sp, {}) if sp.exists() else {}
+    for step in steps:
+        st.pop(step, None)
+    write_json_file(sp, st, indent=2)
+
+
+def delete_job_files(job_dir: Path, filenames: List[str]):
+    for filename in filenames:
+        path = job_dir / filename
+        if path.exists():
+            path.unlink()
 
 
 def analyze_lengths(job_dir_s: str):
@@ -286,7 +312,7 @@ def analyze_lengths(job_dir_s: str):
     config = load_job(job_dir)
     fastq_path = job_dir / config["fastq_name"]
     lengths = [len(seq) for _, seq, _, _ in iter_fastq(fastq_path)]
-    (job_dir / "lengths.json").write_text(json.dumps(lengths))
+    write_json_file(job_dir / "lengths.json", lengths)
     update_status(job_dir, "lengths", "done")
 
 
@@ -320,7 +346,7 @@ def filter_and_barcodes(job_dir_s: str, min_len: int, max_len: int):
             "pct": (100.0 * count / total) if total else 0,
         })
     barcodes.sort(key=lambda x: x["count"], reverse=True)
-    (job_dir / "barcode_step1.json").write_text(json.dumps({"total": total, "barcodes": barcodes}, indent=2))
+    write_json_file(job_dir / "barcode_step1.json", {"total": total, "barcodes": barcodes}, indent=2)
     update_status(job_dir, "filter_barcodes", "done")
 
 
@@ -401,7 +427,7 @@ def quantitate_final(job_dir_s: str, selected: List[str]):
             "pct": (100.0 * count / total) if total else 0,
         })
     rows.sort(key=lambda x: x["count"], reverse=True)
-    (job_dir / "final_quant.json").write_text(json.dumps({"total": total, "paired": dual, "rows": rows}, indent=2))
+    write_json_file(job_dir / "final_quant.json", {"total": total, "paired": dual, "rows": rows}, indent=2)
     update_status(job_dir, "final_quant", "done")
 
 
@@ -505,7 +531,7 @@ def job_status(job_id):
     sp = job_dir / "status.json"
     if not sp.exists():
         return jsonify({})
-    return jsonify(json.loads(sp.read_text()))
+    return jsonify(read_json_file(sp, {}))
 
 
 @app.route("/api/job/<job_id>/lengths")
@@ -513,7 +539,10 @@ def job_lengths(job_id):
     p = DATA_DIR / job_id / "lengths.json"
     if not p.exists():
         return jsonify({"ready": False})
-    return jsonify({"ready": True, "lengths": json.loads(p.read_text())})
+    lengths = read_json_file(p)
+    if lengths is None:
+        return jsonify({"ready": False})
+    return jsonify({"ready": True, "lengths": lengths})
 
 
 @app.route("/api/job/<job_id>/submit_length_filter", methods=["POST"])
@@ -525,6 +554,9 @@ def submit_length_filter(job_id):
     cfg["min_len"] = min_len
     cfg["max_len"] = max_len
     save_job(job_dir, cfg)
+    clear_statuses(job_dir, ["final_quant", "split"])
+    delete_job_files(job_dir, ["barcode_step1.json", "final_quant.json"])
+    delete_existing_split_files(job_dir, cfg)
     update_status(job_dir, "filter_barcodes", "queued")
     executor.submit(filter_and_barcodes, str(job_dir), min_len, max_len)
     return jsonify({"ok": True})
@@ -535,7 +567,10 @@ def barcode_step1(job_id):
     p = DATA_DIR / job_id / "barcode_step1.json"
     if not p.exists():
         return jsonify({"ready": False})
-    return jsonify({"ready": True, **json.loads(p.read_text())})
+    data = read_json_file(p)
+    if data is None:
+        return jsonify({"ready": False})
+    return jsonify({"ready": True, **data})
 
 
 @app.route("/api/job/<job_id>/submit_step4", methods=["POST"])
@@ -545,6 +580,9 @@ def submit_step4(job_id):
     cfg = load_job(job_dir)
     cfg["selected_step4"] = selected
     save_job(job_dir, cfg)
+    clear_statuses(job_dir, ["split"])
+    delete_job_files(job_dir, ["final_quant.json"])
+    delete_existing_split_files(job_dir, cfg)
     update_status(job_dir, "final_quant", "queued")
     executor.submit(quantitate_final, str(job_dir), selected)
     return jsonify({"ok": True})
@@ -555,7 +593,10 @@ def final_quant(job_id):
     p = DATA_DIR / job_id / "final_quant.json"
     if not p.exists():
         return jsonify({"ready": False})
-    return jsonify({"ready": True, **json.loads(p.read_text())})
+    data = read_json_file(p)
+    if data is None:
+        return jsonify({"ready": False})
+    return jsonify({"ready": True, **data})
 
 
 @app.route("/api/job/<job_id>/downloads")
