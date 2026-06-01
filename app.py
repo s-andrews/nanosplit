@@ -102,20 +102,73 @@ def barcode_label_map(cfg: Dict) -> Dict[str, str]:
     for row in cfg.get("named_barcodes", []):
         if len(row) < 2:
             continue
-        name, barcode = row[0], row[1]
-        if not name or not barcode:
+        name = row[0]
+        if not name:
             continue
-        label = f"{safe_filename_part(name)}_{safe_filename_part(barcode)}"
-        labels[barcode] = label
-        labels[rc(barcode)] = label
-        labels[min(barcode, rc(barcode))] = label
+        for barcode in row[1:]:
+            if not barcode:
+                continue
+            label = f"{safe_filename_part(name)}_{safe_filename_part(barcode)}"
+            labels[barcode] = label
+            labels[rc(barcode)] = label
+            labels[min(barcode, rc(barcode))] = label
     return labels
 
 
 def output_label_for_key(key: str, cfg: Dict) -> str:
-    labels = barcode_label_map(cfg)
+    pair_label = paired_output_label_for_key(key, cfg)
+    if pair_label:
+        return pair_label
+
     parts = key.split("|")
+    if len(parts) == 2:
+        return "__".join(safe_filename_part(part) for part in parts)
+
+    labels = barcode_label_map(cfg)
     return "__".join(labels.get(part, safe_filename_part(part)) for part in parts)
+
+
+def barcode_matches(candidate: str, expected: str) -> bool:
+    return candidate == expected or candidate == rc(expected)
+
+
+def paired_output_label_for_key(key: str, cfg: Dict) -> Optional[str]:
+    parts = key.split("|")
+    if len(parts) != 2:
+        return None
+
+    for row in cfg.get("named_barcodes", []):
+        if len(row) < 3:
+            continue
+        name = row[0]
+        expected = [barcode for barcode in row[1:] if barcode]
+        if not name or len(expected) != 2:
+            continue
+
+        matches_forward = barcode_matches(parts[0], expected[0]) and barcode_matches(parts[1], expected[1])
+        matches_reverse = barcode_matches(parts[0], expected[1]) and barcode_matches(parts[1], expected[0])
+        if matches_forward or matches_reverse:
+            return f"{safe_filename_part(name)}_{safe_filename_part(parts[0])}__{safe_filename_part(parts[1])}"
+
+    return None
+
+
+def named_pair_key(left: str, right: str, cfg: Dict) -> Optional[Tuple[str, str]]:
+    for row in cfg.get("named_barcodes", []):
+        if len(row) < 3:
+            continue
+        expected = [barcode for barcode in row[1:] if barcode]
+        if len(expected) != 2:
+            continue
+
+        matches_forward = barcode_matches(left, expected[0]) and barcode_matches(right, expected[1])
+        matches_reverse = barcode_matches(left, expected[1]) and barcode_matches(right, expected[0])
+        if matches_forward:
+            return f"{expected[0]}|{expected[1]}", "forward"
+        if matches_reverse:
+            return f"{expected[0]}|{expected[1]}", "reverse"
+
+    return None
 
 
 def barcode_order_map(cfg: Dict) -> Dict[str, int]:
@@ -123,12 +176,12 @@ def barcode_order_map(cfg: Dict) -> Dict[str, int]:
     for i, row in enumerate(cfg.get("named_barcodes", [])):
         if len(row) < 2:
             continue
-        barcode = row[1]
-        if not barcode:
-            continue
-        order[barcode] = i
-        order[rc(barcode)] = i
-        order[min(barcode, rc(barcode))] = i
+        for barcode in row[1:]:
+            if not barcode:
+                continue
+            order[barcode] = i
+            order[rc(barcode)] = i
+            order[min(barcode, rc(barcode))] = i
     return order
 
 
@@ -137,16 +190,20 @@ def preferred_barcode_map(cfg: Dict) -> Dict[str, str]:
     for row in cfg.get("named_barcodes", []):
         if len(row) < 2:
             continue
-        barcode = row[1]
-        if not barcode:
-            continue
-        preferred[barcode] = barcode
-        preferred[rc(barcode)] = barcode
-        preferred[min(barcode, rc(barcode))] = barcode
+        for barcode in row[1:]:
+            if not barcode:
+                continue
+            preferred[barcode] = barcode
+            preferred[rc(barcode)] = barcode
+            preferred[min(barcode, rc(barcode))] = barcode
     return preferred
 
 
 def canonical_pair_key(left: str, right: str, cfg: Dict) -> Tuple[str, str]:
+    named_pair = named_pair_key(left, right, cfg)
+    if named_pair:
+        return named_pair
+
     order = barcode_order_map(cfg)
     preferred = preferred_barcode_map(cfg)
     left_key = preferred.get(left, left)
@@ -207,6 +264,11 @@ def split_download_paths(job_dir: Path, cfg: Dict) -> List[Path]:
         seen.add(path.name)
         result.append(path)
     return result
+
+
+def delete_existing_split_files(job_dir: Path, cfg: Dict):
+    for path in split_download_paths(job_dir, cfg):
+        path.unlink()
 
 
 def update_status(job_dir: Path, step: str, status: str):
@@ -350,6 +412,7 @@ def split_fastq(job_dir_s: str, selected_keys: List[str]):
     dual = cfg["barcode_mode"] == "both"
     chosen = set(selected_keys)
     output_base = get_output_base(cfg)
+    delete_existing_split_files(job_dir, cfg)
     outs = {}
     split_files = []
     used_filenames = set()
