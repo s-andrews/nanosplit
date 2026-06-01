@@ -264,7 +264,7 @@ def filter_and_barcodes(job_dir_s: str, min_len: int, max_len: int):
 
 def barcode_matches_at_start(seq: str, barcode: str, max_offset: int = 3) -> bool:
     candidates = {barcode, rc(barcode)}
-    for offset in (0, 1, 2, 3):
+    for offset in range(max_offset + 1):
         if offset > max_offset or len(seq) < len(barcode) + offset:
             continue
         frag = seq[offset:offset + len(barcode)]
@@ -275,7 +275,7 @@ def barcode_matches_at_start(seq: str, barcode: str, max_offset: int = 3) -> boo
 
 def barcode_matches_at_end(seq: str, barcode: str, max_offset: int = 3) -> bool:
     candidates = {barcode, rc(barcode)}
-    for offset in (0, 1, 2, 3):
+    for offset in range(max_offset + 1):
         if offset > max_offset or len(seq) < len(barcode) + offset:
             continue
         end = len(seq) - offset if offset else len(seq)
@@ -285,17 +285,26 @@ def barcode_matches_at_end(seq: str, barcode: str, max_offset: int = 3) -> bool:
     return False
 
 
-def selected_barcode_at_start(seq: str, selected: List[str]) -> Optional[str]:
-    for barcode in selected:
-        if barcode_matches_at_start(seq, barcode):
-            return barcode
+def selected_barcode_at_start(seq: str, selected: List[str], max_offset: int = 3) -> Optional[str]:
+    for offset in range(max_offset + 1):
+        for barcode in selected:
+            if len(seq) < len(barcode) + offset:
+                continue
+            frag = seq[offset:offset + len(barcode)]
+            if frag in {barcode, rc(barcode)}:
+                return barcode
     return None
 
 
-def selected_barcode_at_end(seq: str, selected: List[str]) -> Optional[str]:
-    for barcode in selected:
-        if barcode_matches_at_end(seq, barcode):
-            return barcode
+def selected_barcode_at_end(seq: str, selected: List[str], max_offset: int = 3) -> Optional[str]:
+    for offset in range(max_offset + 1):
+        for barcode in selected:
+            if len(seq) < len(barcode) + offset:
+                continue
+            end = len(seq) - offset if offset else len(seq)
+            frag = seq[end - len(barcode):end]
+            if frag in {barcode, rc(barcode)}:
+                return barcode
     return None
 
 
