@@ -20,7 +20,7 @@
   <h2>Job {{ job.job_id }}</h2>
   <p><strong>Input:</strong> {{ job.fastq_name }} | Barcode length: {{ job.barcode_length }} | Mode: {{ job.barcode_mode }}</p>
 
-  <div class="card p-3 mb-3">
+  <div id="step-lengths" class="card p-3 mb-3">
     <h4>Step 1: Filter Reads by Length</h4>
     <div class="chart-wrap"><canvas id="lenChart"></canvas></div>
     <div class="row mt-3">
@@ -33,7 +33,7 @@
     </p>
   </div>
 
-  <div class="card p-3 mb-3">
+  <div id="step-barcodes" class="card p-3 mb-3">
     <h4>Step 2: Select Putative Barcodes</h4>
     <div class="chart-wrap"><canvas id="bcChart"></canvas></div>
     <div class="mt-2">
@@ -65,7 +65,7 @@
 
   </div>
 
-  <div class="card p-3 mb-3">
+  <div id="step-final" class="card p-3 mb-3">
     <h4>Step 3: Select final barcode combinations</h4>
     <div class="chart-wrap"><canvas id="finalChart"></canvas></div>
     <div class="selection-controls mt-2">
@@ -85,7 +85,7 @@
     </div>
   </div>
 
-  <div class="card p-3">
+  <div id="step-downloads" class="card p-3">
     <h4>Step 4: Download Results</h4>
     <div id="downloads"></div>
   </div>
@@ -112,6 +112,12 @@ const STEP_LOADERS = {
   final_quant: loadStep5,
   split: loadDownloads,
 };
+const STEP_TARGETS = {
+  lengths: 'step-lengths',
+  filter_barcodes: 'step-barcodes',
+  final_quant: 'step-final',
+  split: 'step-downloads',
+};
 
 async function fetchStatus() {
   return (await fetch(`${APP_ROOT}/api/job/${JOB_ID}/status`, {cache: 'no-store'})).json();
@@ -136,6 +142,8 @@ function watchStep(step) {
     if (status[step] === 'done') {
       clearInterval(pollTimer);
       pollTimer = null;
+      const target = STEP_TARGETS[step];
+      if (target) window.location.hash = target;
       window.location.reload();
     }
   };
@@ -454,7 +462,15 @@ async function loadDownloads(){
 async function init() {
   const status = await fetchStatus();
   await renderCompleted(status);
+  scrollToCurrentStep();
   watchStep(firstActiveStep(status));
+}
+
+function scrollToCurrentStep() {
+  if (!window.location.hash) return;
+  const target = document.getElementById(window.location.hash.slice(1));
+  if (!target) return;
+  target.scrollIntoView({block:'start'});
 }
 
 init();
