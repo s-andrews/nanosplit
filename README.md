@@ -1,4 +1,4 @@
-<img src="../main/static/images/nanosplit_log_path.svg?raw=true" alt="NanoSplit Logo" width="100%">
+<img src="../main/static/images/nanosplit_logo_path.svg?raw=true" alt="NanoSplit Logo" width="100%">
 
 NanoSplit is a web application for splitting mixed nanopore FastQ reads by barcode. It guides you through uploading sequences, read-length filtering, barcode discovery, final barcode or barcode-pair quantitation, and download of split FastQ files.
 
