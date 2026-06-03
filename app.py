@@ -618,6 +618,7 @@ def job_downloads(job_id):
     return jsonify({
         "ready": True,
         "files": files,
+        "selected_sequence_count": len(cfg.get("selected_step5", [])),
         "zip_url": url_for("download_split_zip", job_id=job_id) if files else None,
     })
 

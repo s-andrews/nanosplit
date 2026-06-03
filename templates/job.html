@@ -467,9 +467,14 @@ async function loadDownloads(){
     return false;
   }
 
+  const autoAlignControl = data.selected_sequence_count <= 10
+    ? `<a class="btn btn-primary" href="https://www.bioinformatics.babraham.ac.uk/autoalign/?nanosplit=${encodeURIComponent(JOB_ID)}" target="_blank" rel="noopener">Submit Split Sequences to AutoAlign</a>`
+    : `<span class="text-muted">Can't automatically link to AutoAlign (10 sequences maximum)</span>`;
+
   el.innerHTML = `
-    <div class="mb-3">
+    <div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
       <a class="btn btn-success" href="${data.zip_url}">Download all split sequences (.zip)</a>
+      ${autoAlignControl}
     </div>
     <ul class="list-group">
       ${data.files.map(file => `
